@@ -19,13 +19,13 @@ def lambda_handler(event, context):
 
     user, password, approved_senders = load_environment()
 
-    if sender not in approved_senders:
+    if sender in approved_senders:
+        st_text = extract_alert_data(body)
+        if st_text:
+            create_thread(user, password, st_text)
+    else:
         log.warning(f"Got email from unapproved sender: {sender}")
-        exit(0)
 
-    st_text = extract_alert_data(body)
-    if st_text:
-        create_thread(user, password, st_text)
 
 
 def load_environment() -> (str, str, str):
