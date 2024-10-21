@@ -12,20 +12,25 @@ logging.basicConfig(level=logging.WARNING)
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
 
+class SimpleEmail:
+    def __init__(self, sender:str, subject:str, body:str):
+        self.sender = sender
+        self.subject = subject
+        self.body = body
+
 def lambda_handler(event, context):
     log.debug(f"Got Event: {json.dumps(event)}")
-    sender, body = get_message_text(event)
-    log.info(f"Email from {sender}: {body}")
+    mail = get_simplified_email(event)
+    log.info(f"Email from {mail.sender}: {mail.subject}\n{mail.body}")
 
     user, password, approved_senders = load_environment()
 
-    if sender in approved_senders:
-        st_text = extract_alert_data(body)
+    if mail.sender in approved_senders:
+        st_text = extract_alert_data(mail)
         if st_text:
             create_thread(user, password, st_text)
     else:
-        log.warning(f"Got email from unapproved sender: {sender}")
-
+        log.warning(f"Got email from unapproved sender: {mail.sender}")
 
 
 def load_environment() -> (str, str, str):
@@ -45,7 +50,7 @@ def load_environment() -> (str, str, str):
 
     return user, password, approved_senders
 
-def get_message_text(event) -> (str, str):
+def get_simplified_email(event) -> SimpleEmail | None:
     sns_message = deep_get(event, "Records", 0, "Sns", "Message")
     if not sns_message:
         log.warning("Couldn't parse event as SNS message.")
@@ -59,27 +64,40 @@ def get_message_text(event) -> (str, str):
         return
 
     mail = email.message_from_string(email_content, policy=email.policy.default)
-    return sender, mail.get_body('plain').get_content().strip()
+    return SimpleEmail(sender, mail.get('Subject', failobj=''), mail.get_body('plain').get_content().strip())
 
 
 st_email_pattern = re.compile(r'(?P<body>.*?)\s+See something suspicious\?.*', re.DOTALL)
 email_address_pattern = re.compile(r'\S+@\S+.com')
-def extract_alert_data(text:str) -> str :
-    result = st_email_pattern.match(text)
+subject_prefixes = ["Reminder: ", "All Clear: ", "Resolved: ", "{{p_subject}}"]
+def extract_alert_data(mail:SimpleEmail) -> str | None :
+    result = st_email_pattern.match(mail.body)
 
     # If the email doesn't match the pattern I expect, I don't want to publish it
     if not result:
         log.debug(f"Does not match Sound Transit Pattern")
-        return None
+        return
 
     body = result.group('body').strip()
 
     # If the email contains my email address, I don't want to publish it
     if email_address_pattern.findall(body):
         log.warning(f"Not posting; contains an email address")
-        return None
+        return
 
-    return body
+    # If the subject starts with a prefix, pretend that it doesn't
+    simple_subject = mail.subject
+    for prefix in subject_prefixes:
+        if simple_subject.startswith(prefix):
+            simple_subject = simple_subject[len(prefix):].strip()
+
+    # Sometimes the subject line is fully redundant, and sometimes it includes important information
+    if simple_subject in body:
+        # If the body repeats the simplified-subject, only return the body
+        return body
+    else:
+        # If the body does not start with the subject, combine the two
+        return mail.subject + '\n\n' + body
 
 
 def create_thread(username, password, text, max_len=300):
