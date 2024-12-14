@@ -66,8 +66,8 @@ def get_simplified_email(event) -> SimpleEmail | None:
     mail = email.message_from_string(email_content, policy=email.policy.default)
     return SimpleEmail(sender, mail.get('Subject', failobj=''), mail.get_body('plain').get_content().strip())
 
-
-st_email_pattern = re.compile(r'(?P<body>.*?)\s+See something suspicious\?.*', re.DOTALL)
+st_signoffs = r"(?:(:?See something suspicious\?)|(?:Plan your trip or find alternate service options.))"
+st_email_pattern = re.compile(r'(?P<body>.*?)\s+' + st_signoffs + '.*', re.DOTALL)
 email_address_pattern = re.compile(r'\S+@\S+.com')
 subject_prefixes = ["Reminder: ", "All Clear: ", "Resolved: ", "{{p_subject}}"]
 def extract_alert_data(mail:SimpleEmail) -> str | None :
